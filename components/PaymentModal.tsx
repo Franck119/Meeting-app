@@ -2,32 +2,39 @@
 import React, { useState } from 'react';
 import { X, CreditCard, User, Calendar as CalendarIcon, CheckCircle2 } from 'lucide-react';
 import { Meeting, PaymentStatus } from '../types';
+import { supabase } from '../services/supabaseClient';
 
 interface PaymentModalProps {
   meetings: Meeting[];
   onClose: () => void;
-  onAdd: (payment: any) => void;
 }
 
-const PaymentModal: React.FC<PaymentModalProps> = ({ meetings, onClose, onAdd }) => {
+const PaymentModal: React.FC<PaymentModalProps> = ({ meetings, onClose }) => {
   const [formData, setFormData] = useState({
     meetingId: meetings[0]?.id || '',
     payerName: '',
-    amount: meetings[0]?.contributionAmount.toString() || '',
+    amount: meetings[0]?.contributionAmount?.toString() || '',
     method: 'BANK_TRANSFER' as const,
     date: new Date().toISOString().split('T')[0]
   });
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.payerName || !formData.amount) return;
+    if (!formData.payerName || !formData.amount || !formData.meetingId) return;
+    setLoading(true);
 
-    onAdd({
-      id: `p-${Date.now()}`,
-      ...formData,
+    await supabase.from('payments').insert([{
+      meeting_id: formData.meetingId,
+      payer_name: formData.payerName,
       amount: parseInt(formData.amount),
+      method: formData.method,
+      date: formData.date,
       status: PaymentStatus.PAID,
-    });
+      receipt_number: `REC-${Date.now().toString().slice(-6)}`
+    }]);
+
+    setLoading(false);
     onClose();
   };
 
@@ -36,7 +43,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ meetings, onClose, onAdd })
     setFormData({
       ...formData,
       meetingId: id,
-      amount: meeting ? meeting.contributionAmount.toString() : formData.amount
+      amount: meeting ? (meeting as any).contribution_amount?.toString() || meeting.contributionAmount?.toString() : formData.amount
     });
   };
 
@@ -57,7 +64,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ meetings, onClose, onAdd })
               className="w-full px-4 py-3.5 bg-slate-50 dark:bg-slate-800 border-none rounded-2xl focus:ring-2 focus:ring-indigo-500 outline-none text-slate-700 dark:text-slate-200 font-bold"
             >
               {meetings.map(m => (
-                <option key={m.id} value={m.id}>{m.title} ({m.contributionAmount.toLocaleString()} FCFA)</option>
+                <option key={m.id} value={m.id}>{m.title}</option>
               ))}
             </select>
           </div>
@@ -114,10 +121,10 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ meetings, onClose, onAdd })
 
           <button 
             type="submit"
-            className="w-full bg-[#4f46e5] text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-[#4338ca] active:scale-[0.98] transition-all flex items-center justify-center gap-3"
+            disabled={loading}
+            className="w-full bg-[#4f46e5] text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-[#4338ca] active:scale-[0.98] transition-all flex items-center justify-center gap-3 disabled:opacity-50"
           >
-            <CheckCircle2 className="w-6 h-6" />
-            Confirmer le Paiement
+            {loading ? 'Validation Real-time...' : 'Confirmer le Paiement'}
           </button>
         </form>
       </div>

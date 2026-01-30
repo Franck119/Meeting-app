@@ -10,36 +10,73 @@ import DetailsModal from './components/DetailsModal';
 import UserManagement from './components/UserManagement';
 import Reports from './components/Reports';
 import Login from './components/Login';
-import { MOCK_MEETINGS, MOCK_PAYMENTS } from './constants';
+import { supabase } from './services/supabaseClient';
 import { Search, Menu, Sparkles, Moon, Sun, CreditCard, Download, Filter } from 'lucide-react';
-import { Meeting, PaymentStatus, User } from './types';
-
-// Default users for login simulation
-const INITIAL_USERS: User[] = [
-  { id: '1', name: 'Boss Admin', email: 'boss@nexcrm.ai', username: 'boss', password: '123', role: 'SUPER_ADMIN', permissions: ['READ', 'WRITE', 'DELETE', 'APPROVE'], avatar: 'https://picsum.photos/seed/1/100' },
-  { id: '2', name: 'Jean Finance', email: 'jean@nexcrm.ai', username: 'jean', password: '123', role: 'FINANCE_MANAGER', permissions: ['READ', 'WRITE', 'APPROVE'], avatar: 'https://picsum.photos/seed/2/100' },
-];
+import { Meeting, PaymentStatus, User, Payment } from './types';
 
 const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>(INITIAL_USERS);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showMeetingModal, setShowMeetingModal] = useState(false);
-  const [editingMeeting, setEditingMeeting] = useState<any>(null);
+  const [editingMeeting, setEditingMeeting] = useState<Meeting | null>(null);
   const [detailsType, setDetailsType] = useState<'contributions' | 'pending' | 'meetings' | 'projection' | null>(null);
   const [globalSearch, setGlobalSearch] = useState('');
   
-  const [meetings, setMeetings] = useState(MOCK_MEETINGS);
-  const [payments, setPayments] = useState(MOCK_PAYMENTS);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
+  const [payments, setPayments] = useState<Payment[]>([]);
 
+  // 1. Initial Data Fetch & Auth Check
   useEffect(() => {
-    const savedUser = localStorage.getItem('nex_user');
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
+    const checkUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        // Fetch profile
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', session.user.id)
+          .single();
+        
+        if (profile) {
+          setCurrentUser({
+            id: session.user.id,
+            name: profile.name,
+            email: session.user.email!,
+            username: session.user.email!.split('@')[0],
+            role: profile.role,
+            permissions: profile.role === 'SUPER_ADMIN' ? ['READ', 'WRITE', 'DELETE', 'APPROVE'] : ['READ'],
+            avatar: profile.avatar || 'https://picsum.photos/seed/user/100'
+          });
+        }
+      }
+    };
+
+    const fetchData = async () => {
+      const { data: mData } = await supabase.from('meetings').select('*').order('created_at', { ascending: false });
+      const { data: pData } = await supabase.from('payments').select('*').order('date', { ascending: false });
+      if (mData) setMeetings(mData);
+      if (pData) setPayments(pData);
+    };
+
+    checkUser();
+    fetchData();
+
+    // 2. Setup Real-time Subscriptions
+    const meetingsSub = supabase.channel('meetings-changes')
+      .on('postgres_changes', { event: '*', table: 'meetings' }, fetchData)
+      .subscribe();
+
+    const paymentsSub = supabase.channel('payments-changes')
+      .on('postgres_changes', { event: '*', table: 'payments' }, fetchData)
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(meetingsSub);
+      supabase.removeChannel(paymentsSub);
+    };
   }, []);
 
   useEffect(() => {
@@ -50,33 +87,9 @@ const App: React.FC = () => {
     }
   }, [darkMode]);
 
-  const handleLogin = async (username: string, password: string): Promise<boolean> => {
-    // Artificial delay for realism
-    await new Promise(r => setTimeout(r, 800));
-    const user = users.find(u => u.username === username && u.password === password);
-    if (user) {
-      setCurrentUser(user);
-      localStorage.setItem('nex_user', JSON.stringify(user));
-      return true;
-    }
-    return false;
-  };
-
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
     setCurrentUser(null);
-    localStorage.removeItem('nex_user');
-  };
-
-  const handleAddPayment = (newPayment: any) => {
-    setPayments(prev => [...prev, newPayment]);
-  };
-
-  const handleAddMeeting = (newMeeting: any) => {
-    setMeetings(prev => [...prev, newMeeting]);
-  };
-
-  const handleUpdateMeeting = (updatedMeeting: any) => {
-    setMeetings(prev => prev.map(m => m.id === updatedMeeting.id ? updatedMeeting : m));
   };
 
   const filteredPayments = useMemo(() => {
@@ -97,12 +110,12 @@ const App: React.FC = () => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `NexCRM_Global_Report_${new Date().toISOString().split('T')[0]}.csv`;
+    link.download = `NexCRM_RealTime_Report_${new Date().toISOString().split('T')[0]}.csv`;
     link.click();
   };
 
   if (!currentUser) {
-    return <Login onLogin={handleLogin} />;
+    return <Login onLoginSuccess={(user) => setCurrentUser(user)} />;
   }
 
   const renderContent = () => {
@@ -123,8 +136,6 @@ const App: React.FC = () => {
         />;
       case 'chat':
         return <AssistantChat meetings={meetings} payments={payments} />;
-      case 'users':
-        return <UserManagement users={users} setUsers={setUsers} />;
       case 'reports':
         return <Reports payments={payments} meetings={meetings} />;
       case 'payments':
@@ -166,7 +177,7 @@ const App: React.FC = () => {
                     <p className="text-slate-400 font-black uppercase tracking-[0.3em]">Aucun flux trouvé pour "{globalSearch}"</p>
                   </div>
                 ) : (
-                  filteredPayments.slice().reverse().map(p => {
+                  filteredPayments.map(p => {
                     const meet = meetings.find(m => m.id === p.meetingId);
                     return (
                       <div key={p.id} className="group flex flex-col sm:flex-row items-center justify-between p-8 bg-slate-50 dark:bg-slate-800/40 rounded-[32px] border-2 border-transparent hover:border-indigo-100 dark:hover:border-indigo-900 hover:bg-white dark:hover:bg-slate-800 transition-all shadow-sm">
@@ -260,13 +271,11 @@ const App: React.FC = () => {
         <SparklesIcon className="w-12 h-12 group-hover:animate-pulse" />
       </button>
 
-      {showPaymentModal && <PaymentModal meetings={meetings} onClose={() => setShowPaymentModal(false)} onAdd={handleAddPayment} />}
+      {showPaymentModal && <PaymentModal meetings={meetings} onClose={() => setShowPaymentModal(false)} />}
       {(showMeetingModal || editingMeeting) && (
         <MeetingModal 
           editingMeeting={editingMeeting} 
           onClose={() => { setShowMeetingModal(false); setEditingMeeting(null); }} 
-          onAdd={handleAddMeeting} 
-          onUpdate={handleUpdateMeeting}
         />
       )}
       {detailsType && (

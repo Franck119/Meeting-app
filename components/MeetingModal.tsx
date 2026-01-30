@@ -2,15 +2,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, Calendar as CalendarIcon, CheckCircle2, MapPin, Save, FileText } from 'lucide-react';
 import { Meeting, MeetingFrequency } from '../types';
+import { supabase } from '../services/supabaseClient';
 
 interface MeetingModalProps {
   editingMeeting?: Meeting | null;
   onClose: () => void;
-  onAdd: (meeting: any) => void;
-  onUpdate: (meeting: any) => void;
 }
 
-const MeetingModal: React.FC<MeetingModalProps> = ({ editingMeeting, onClose, onAdd, onUpdate }) => {
+const MeetingModal: React.FC<MeetingModalProps> = ({ editingMeeting, onClose }) => {
   const [formData, setFormData] = useState({
     title: '',
     category: 'Général',
@@ -21,6 +20,7 @@ const MeetingModal: React.FC<MeetingModalProps> = ({ editingMeeting, onClose, on
     color: 'bg-indigo-500',
     specifications: ''
   });
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (editingMeeting) {
@@ -36,6 +36,32 @@ const MeetingModal: React.FC<MeetingModalProps> = ({ editingMeeting, onClose, on
       });
     }
   }, [editingMeeting]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.title || !formData.contributionAmount || !formData.location) return;
+    setLoading(true);
+
+    const payload = {
+      title: formData.title,
+      category: formData.category,
+      location: formData.location,
+      frequency: formData.frequency,
+      contribution_amount: parseInt(formData.contributionAmount),
+      next_date: formData.nextDate,
+      color: formData.color,
+      specifications: formData.specifications
+    };
+
+    if (editingMeeting) {
+      await supabase.from('meetings').update(payload).eq('id', editingMeeting.id);
+    } else {
+      await supabase.from('meetings').insert([{ ...payload, attendees: ['Boss Admin'] }]);
+    }
+    
+    setLoading(false);
+    onClose();
+  };
 
   const colors = [
     { name: 'Indigo', class: 'bg-indigo-500' },
@@ -54,27 +80,6 @@ const MeetingModal: React.FC<MeetingModalProps> = ({ editingMeeting, onClose, on
     { name: 'Pink', class: 'bg-pink-400' },
     { name: 'Blue', class: 'bg-blue-600' }
   ];
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.title || !formData.contributionAmount || !formData.location) return;
-
-    if (editingMeeting) {
-      onUpdate({
-        ...editingMeeting,
-        ...formData,
-        contributionAmount: parseInt(formData.contributionAmount)
-      });
-    } else {
-      onAdd({
-        id: `m-${Date.now()}`,
-        ...formData,
-        contributionAmount: parseInt(formData.contributionAmount),
-        attendees: ['Boss Admin']
-      });
-    }
-    onClose();
-  };
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 overflow-y-auto">
@@ -176,26 +181,12 @@ const MeetingModal: React.FC<MeetingModalProps> = ({ editingMeeting, onClose, on
             </div>
           </div>
 
-          <div className="space-y-3">
-            <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Couleur Signature (Palette de 15)</label>
-            <div className="grid grid-cols-5 gap-2 sm:gap-3">
-              {colors.map(c => (
-                <button
-                  key={c.class}
-                  type="button"
-                  onClick={() => setFormData({...formData, color: c.class})}
-                  className={`w-full aspect-square rounded-xl transition-all transform hover:scale-105 active:scale-95 ${c.class} ${formData.color === c.class ? 'ring-4 ring-slate-200 dark:ring-slate-700 ring-offset-2 dark:ring-offset-slate-900 shadow-lg scale-105' : 'opacity-60 hover:opacity-100'}`}
-                />
-              ))}
-            </div>
-          </div>
-
           <button 
             type="submit"
-            className="w-full bg-[#4f46e5] text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-[#4338ca] active:scale-[0.98] transition-all flex items-center justify-center gap-3 mt-4"
+            disabled={loading}
+            className="w-full bg-[#4f46e5] text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-indigo-200 dark:shadow-none hover:bg-[#4338ca] active:scale-[0.98] transition-all flex items-center justify-center gap-3 mt-4 disabled:opacity-50"
           >
-            {editingMeeting ? <Save className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
-            {editingMeeting ? 'Sauvegarder Modifications' : 'Créer la Réunion'}
+            {loading ? 'Traitement Real-time...' : editingMeeting ? 'Sauvegarder Modifications' : 'Créer la Réunion'}
           </button>
         </form>
       </div>

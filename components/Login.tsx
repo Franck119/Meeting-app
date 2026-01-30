@@ -1,14 +1,15 @@
 
 import React, { useState } from 'react';
 import { Lock, User, Sparkles, ShieldCheck, ArrowRight, Loader2 } from 'lucide-react';
+import { supabase } from '../services/supabaseClient';
 import { User as UserType } from '../types';
 
 interface LoginProps {
-  onLogin: (username: string, password: string) => Promise<boolean>;
+  onLoginSuccess: (user: UserType) => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  const [username, setUsername] = useState('');
+const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,17 +19,38 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setError('');
     setLoading(true);
 
-    const success = await onLogin(username, password);
-    
-    if (!success) {
+    const { data, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (authError) {
       setError('Identifiants invalides. Accès refusé par Nex Intelligence.');
       setLoading(false);
+      return;
+    }
+
+    if (data.user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', data.user.id)
+        .single();
+      
+      onLoginSuccess({
+        id: data.user.id,
+        name: profile?.name || 'User',
+        email: data.user.email!,
+        username: data.user.email!.split('@')[0],
+        role: profile?.role || 'VIEWER',
+        permissions: profile?.role === 'SUPER_ADMIN' ? ['READ', 'WRITE', 'DELETE', 'APPROVE'] : ['READ'],
+        avatar: profile?.avatar || 'https://picsum.photos/seed/user/100'
+      });
     }
   };
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#0f172a] p-4 sm:p-6 relative overflow-hidden font-inter">
-      {/* Background Decorative Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-600/20 rounded-full blur-[120px] animate-pulse"></div>
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-600/10 rounded-full blur-[120px]"></div>
 
@@ -47,15 +69,15 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-4">Identifiant</label>
+              <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-4">Email Nex</label>
               <div className="relative group">
                 <User className="absolute left-5 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
                 <input 
                   required
-                  type="text" 
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Username"
+                  type="email" 
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="boss@nexcrm.ai"
                   className="w-full bg-white/5 border-2 border-transparent focus:border-indigo-500/30 rounded-[24px] py-4 pl-14 pr-6 text-white font-bold outline-none transition-all placeholder:text-slate-600"
                 />
               </div>
